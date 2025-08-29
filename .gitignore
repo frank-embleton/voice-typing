@@ -1,0 +1,23 @@
+# Binaries
+dict
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+*.test
+*.out
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Config files (contains API keys)
+.assemblyai-transcriber.json
