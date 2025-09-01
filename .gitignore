@@ -21,3 +21,6 @@ Thumbs.db
 
 # Config files (contains API keys)
 .assemblyai-transcriber.json
+
+# built apps
+voice-typing
