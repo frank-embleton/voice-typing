@@ -164,7 +164,6 @@ func (a *App) setupUI() {
 
 func (a *App) setupKeyboardShortcuts() {
 	// Keyboard shortcuts
-	space := &desktop.CustomShortcut{KeyName: fyne.KeySpace, Modifier: 0}
 	ctrlR := &desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: desktop.ControlModifier}
 	ctrlL := &desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: desktop.ControlModifier}
 	ctrlC := &desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: desktop.ControlModifier}
@@ -172,9 +171,6 @@ func (a *App) setupKeyboardShortcuts() {
 	ctrlZ := &desktop.CustomShortcut{KeyName: fyne.KeyZ, Modifier: desktop.ControlModifier}
 
 	// Toggle recording - Spacebar or Ctrl+R
-	a.window.Canvas().AddShortcut(space, func(_ fyne.Shortcut) {
-		a.toggleRecording()
-	})
 	a.window.Canvas().AddShortcut(ctrlR, func(_ fyne.Shortcut) {
 		a.toggleRecording()
 	})
@@ -781,12 +777,12 @@ func (a *App) resetAutoStopTimer() {
 	if !a.recording {
 		return
 	}
-	
+
 	a.lastActivityTime = time.Now()
 	if a.autoStopTimer != nil {
 		a.autoStopTimer.Stop()
 	}
-	
+
 	a.autoStopTimer = time.AfterFunc(5*time.Second, func() {
 		log.Printf("DEBUG: Auto-stop timer expired - no transcript activity for 5 seconds")
 		if a.recording {
