@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -26,8 +27,7 @@ import (
 type App struct {
 	fyneApp     fyne.App
 	window      fyne.Window
-	startBtn    *widget.Button
-	stopBtn     *widget.Button
+	recordBtn   *widget.Button
 	clearBtn    *widget.Button
 	copyBtn     *widget.Button
 	processBtn  *widget.Button
@@ -57,6 +57,10 @@ type App struct {
 
 	// Undo functionality
 	previousText string
+
+	// Auto-stop functionality
+	lastActivityTime time.Time
+	autoStopTimer    *time.Timer
 
 	mu sync.RWMutex
 }
@@ -120,19 +124,16 @@ func (a *App) setupUI() {
 	headerContainer := container.NewBorder(nil, nil, nil, a.settingsBtn, widget.NewLabel("Voice Typing"))
 
 	// Buttons
-	a.startBtn = widget.NewButtonWithIcon("Start", theme.MediaPlayIcon(), a.startRecording)
-	a.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), a.stopRecording)
+	a.recordBtn = widget.NewButtonWithIcon("Start Recording", theme.MediaPlayIcon(), a.toggleRecording)
 	a.clearBtn = widget.NewButtonWithIcon("Clear", theme.DeleteIcon(), a.clearText)
 	a.copyBtn = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), a.copyText)
 	a.processBtn = widget.NewButtonWithIcon("Process with LLM", theme.ComputerIcon(), a.processWithLLM)
 	a.undoBtn = widget.NewButtonWithIcon("Undo", theme.NavigateBackIcon(), a.undoText)
 
-	a.stopBtn.Disable()
 	a.undoBtn.Disable()
 
 	buttonContainer := container.NewHBox(
-		a.startBtn,
-		a.stopBtn,
+		a.recordBtn,
 		a.clearBtn,
 		a.copyBtn,
 		a.processBtn,
@@ -165,29 +166,17 @@ func (a *App) setupKeyboardShortcuts() {
 	// Keyboard shortcuts
 	space := &desktop.CustomShortcut{KeyName: fyne.KeySpace, Modifier: 0}
 	ctrlR := &desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: desktop.ControlModifier}
-	ctrlS := &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: desktop.ControlModifier}
 	ctrlL := &desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: desktop.ControlModifier}
 	ctrlC := &desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: desktop.ControlModifier}
 	ctrlP := &desktop.CustomShortcut{KeyName: fyne.KeyP, Modifier: desktop.ControlModifier}
 	ctrlZ := &desktop.CustomShortcut{KeyName: fyne.KeyZ, Modifier: desktop.ControlModifier}
 
-	// Start recording - Spacebar or Ctrl+R
+	// Toggle recording - Spacebar or Ctrl+R
 	a.window.Canvas().AddShortcut(space, func(_ fyne.Shortcut) {
-		if !a.recording {
-			a.startRecording()
-		}
+		a.toggleRecording()
 	})
 	a.window.Canvas().AddShortcut(ctrlR, func(_ fyne.Shortcut) {
-		if !a.recording {
-			a.startRecording()
-		}
-	})
-
-	// Stop recording - Ctrl+S
-	a.window.Canvas().AddShortcut(ctrlS, func(_ fyne.Shortcut) {
-		if a.recording {
-			a.stopRecording()
-		}
+		a.toggleRecording()
 	})
 
 	// Clear - Ctrl+L
@@ -211,6 +200,14 @@ func (a *App) setupKeyboardShortcuts() {
 	})
 }
 
+func (a *App) toggleRecording() {
+	if a.recording {
+		a.stopRecording()
+	} else {
+		a.startRecording()
+	}
+}
+
 func (a *App) startRecording() {
 	log.Printf("DEBUG: Start recording requested")
 	if a.assemblyAPIKey == "" {
@@ -229,7 +226,7 @@ func (a *App) startRecording() {
 
 	log.Printf("DEBUG: Starting recording process")
 	a.updateStatus("Connecting...")
-	a.startBtn.Disable()
+	a.recordBtn.Disable()
 
 	go func() {
 		log.Printf("DEBUG: Attempting WebSocket connection")
@@ -237,7 +234,11 @@ func (a *App) startRecording() {
 		if err != nil {
 			log.Printf("DEBUG: WebSocket connection failed: %v", err)
 			a.updateStatus("Error: " + err.Error())
-			a.startBtn.Enable()
+			fyne.Do(func() {
+				a.recordBtn.SetText("Start Recording")
+				a.recordBtn.SetIcon(theme.MediaPlayIcon())
+				a.recordBtn.Enable()
+			})
 			return
 		}
 
@@ -246,15 +247,22 @@ func (a *App) startRecording() {
 		if err != nil {
 			log.Printf("DEBUG: Audio capture failed: %v", err)
 			a.updateStatus("Audio Error: " + err.Error())
-			a.startBtn.Enable()
+			fyne.Do(func() {
+				a.recordBtn.SetText("Start Recording")
+				a.recordBtn.SetIcon(theme.MediaPlayIcon())
+				a.recordBtn.Enable()
+			})
 			a.closeWebSocket()
 			return
 		}
 
 		log.Printf("DEBUG: Recording started successfully")
 		a.recording = true
+		a.startAutoStopTimer()
 		fyne.Do(func() {
-			a.stopBtn.Enable()
+			a.recordBtn.SetText("Stop Recording")
+			a.recordBtn.SetIcon(theme.MediaStopIcon())
+			a.recordBtn.Enable()
 		})
 		fyne.Do(func() {
 			a.updateStatus("Recording...")
@@ -271,14 +279,17 @@ func (a *App) stopRecording() {
 	}
 
 	a.recording = false
-	a.stopBtn.Disable()
+	a.stopAutoStopTimer()
+	a.recordBtn.Disable()
 	a.updateStatus("Stopping...")
 
 	go func() {
 		a.stopAudio()
 		a.closeWebSocket()
 		fyne.Do(func() {
-			a.startBtn.Enable()
+			a.recordBtn.SetText("Start Recording")
+			a.recordBtn.SetIcon(theme.MediaPlayIcon())
+			a.recordBtn.Enable()
 		})
 		fyne.Do(func() {
 			a.updateStatus("Ready")
@@ -537,6 +548,7 @@ func (a *App) handleWebSocketMessages() {
 			log.Printf("DEBUG: Session began: ID=%s", msg.ID)
 		case "Turn":
 			log.Printf("DEBUG: Turn message - EndOfTurn: %v, TurnOrder: %d, Transcript: '%s'", msg.EndOfTurn, msg.TurnOrder, msg.Transcript)
+			a.resetAutoStopTimer()
 			if msg.EndOfTurn {
 				a.mu.Lock()
 				if msg.TurnOrder == a.lastTurnOrder {
@@ -741,4 +753,48 @@ func (a *App) saveConfig() {
 	}
 
 	dialog.ShowInformation("Config Saved", "Settings have been saved", a.window)
+}
+
+func (a *App) startAutoStopTimer() {
+	a.lastActivityTime = time.Now()
+	a.autoStopTimer = time.AfterFunc(5*time.Second, func() {
+		log.Printf("DEBUG: Auto-stop timer expired - no transcript activity for 5 seconds")
+		if a.recording {
+			fyne.Do(func() {
+				a.updateStatus("Auto-stopping due to silence...")
+			})
+			a.stopRecording()
+		}
+	})
+	log.Printf("DEBUG: Auto-stop timer started (5 seconds)")
+}
+
+func (a *App) stopAutoStopTimer() {
+	if a.autoStopTimer != nil {
+		a.autoStopTimer.Stop()
+		a.autoStopTimer = nil
+		log.Printf("DEBUG: Auto-stop timer stopped")
+	}
+}
+
+func (a *App) resetAutoStopTimer() {
+	if !a.recording {
+		return
+	}
+	
+	a.lastActivityTime = time.Now()
+	if a.autoStopTimer != nil {
+		a.autoStopTimer.Stop()
+	}
+	
+	a.autoStopTimer = time.AfterFunc(5*time.Second, func() {
+		log.Printf("DEBUG: Auto-stop timer expired - no transcript activity for 5 seconds")
+		if a.recording {
+			fyne.Do(func() {
+				a.updateStatus("Auto-stopping due to silence...")
+			})
+			a.stopRecording()
+		}
+	})
+	log.Printf("DEBUG: Auto-stop timer reset (5 seconds)")
 }
