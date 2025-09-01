@@ -125,8 +125,10 @@ func (a *App) setupUI() {
 	a.clearBtn = widget.NewButtonWithIcon("Clear", theme.DeleteIcon(), a.clearText)
 	a.copyBtn = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), a.copyText)
 	a.processBtn = widget.NewButtonWithIcon("Process with LLM", theme.ComputerIcon(), a.processWithLLM)
+	a.undoBtn = widget.NewButtonWithIcon("Undo", theme.NavigateBackIcon(), a.undoText)
 	
 	a.stopBtn.Disable()
+	a.undoBtn.Disable()
 	
 	buttonContainer := container.NewHBox(
 		a.startBtn,
@@ -134,6 +136,7 @@ func (a *App) setupUI() {
 		a.clearBtn,
 		a.copyBtn,
 		a.processBtn,
+		a.undoBtn,
 	)
 	
 	// Status
@@ -166,6 +169,7 @@ func (a *App) setupKeyboardShortcuts() {
 	ctrlL := &desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: desktop.ControlModifier}
 	ctrlC := &desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: desktop.ControlModifier}
 	ctrlP := &desktop.CustomShortcut{KeyName: fyne.KeyP, Modifier: desktop.ControlModifier}
+	ctrlZ := &desktop.CustomShortcut{KeyName: fyne.KeyZ, Modifier: desktop.ControlModifier}
 	
 	// Start recording - Spacebar or Ctrl+R
 	a.window.Canvas().AddShortcut(space, func(_ fyne.Shortcut) {
@@ -199,6 +203,11 @@ func (a *App) setupKeyboardShortcuts() {
 	// Process with LLM - Ctrl+P
 	a.window.Canvas().AddShortcut(ctrlP, func(_ fyne.Shortcut) {
 		a.processWithLLM()
+	})
+	
+	// Undo - Ctrl+Z
+	a.window.Canvas().AddShortcut(ctrlZ, func(_ fyne.Shortcut) {
+		a.undoText()
 	})
 }
 
@@ -291,6 +300,17 @@ func (a *App) copyText() {
 	a.window.Clipboard().SetContent(a.textArea.Text)
 }
 
+func (a *App) undoText() {
+	if a.previousText == "" {
+		return
+	}
+	
+	a.textArea.SetText(a.previousText)
+	a.previousText = ""
+	a.undoBtn.Disable()
+	a.updateStatus("Text reverted")
+}
+
 func (a *App) showSettingsModal() {
 	// Create form fields
 	assemblyAPIEntry := widget.NewPasswordEntry()
@@ -377,6 +397,9 @@ func (a *App) processWithLLM() {
 		return
 	}
 	
+	// Store current text for undo functionality
+	a.previousText = text
+	
 	a.updateStatus("Processing with LLM...")
 	a.processBtn.Disable()
 	
@@ -390,6 +413,7 @@ func (a *App) processWithLLM() {
 				dialog.ShowError(err, a.window)
 			} else {
 				a.textArea.SetText(processedText)
+				a.undoBtn.Enable()
 				a.updateStatus("Text processed successfully")
 			}
 		})
