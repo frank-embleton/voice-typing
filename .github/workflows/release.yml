@@ -19,18 +19,10 @@ jobs:
             goos: linux
             goarch: amd64
             binary_suffix: ""
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            binary_suffix: ""
           - os: windows-latest
             goos: windows
             goarch: amd64
             binary_suffix: ".exe"
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            binary_suffix: ""
           - os: macos-latest
             goos: darwin
             goarch: arm64
